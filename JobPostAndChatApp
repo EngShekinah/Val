@@ -1,0 +1,259 @@
+/** @jsxImportSource https://esm.sh/react@18.2.0 */
+import React, { useState, useEffect } from "https://esm.sh/react@18.2.0";
+import { createRoot } from "https://esm.sh/react-dom@18.2.0/client";
+
+function App() {
+  const [username, setUsername] = useState("");
+  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [jobTitle, setJobTitle] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
+
+  useEffect(() => {
+    fetchMessages();
+    fetchJobs();
+  }, []);
+
+  const fetchMessages = async () => {
+    const response = await fetch("/messages");
+    const data = await response.json();
+    setMessages(data);
+  };
+
+  const fetchJobs = async () => {
+    const response = await fetch("/jobs");
+    const data = await response.json();
+    setJobs(data);
+  };
+
+  const submitMessage = async (e) => {
+    e.preventDefault();
+    if (!username) {
+      alert("Please set a username first!");
+      return;
+    }
+    await fetch("/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, message })
+    });
+    setMessage("");
+    fetchMessages();
+  };
+
+  const submitJob = async (e) => {
+    e.preventDefault();
+    await fetch("/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobTitle, jobDescription })
+    });
+    setJobTitle("");
+    setJobDescription("");
+    fetchJobs();
+  };
+
+  return (
+    <div className="container">
+      <h1>Job Chat 💼</h1>
+      
+      <div className="username-section">
+        <input 
+          type="text" 
+          placeholder="Set Your Username" 
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+      </div>
+
+      <div className="jobs-section">
+        <h2>Job Postings</h2>
+        <form onSubmit={submitJob}>
+          <input 
+            type="text" 
+            placeholder="Job Title" 
+            value={jobTitle}
+            onChange={(e) => setJobTitle(e.target.value)}
+            required 
+          />
+          <textarea 
+            placeholder="Job Description" 
+            value={jobDescription}
+            onChange={(e) => setJobDescription(e.target.value)}
+            required 
+          />
+          <button type="submit">Post Job</button>
+        </form>
+        <div className="job-list">
+          {jobs.map((job, index) => (
+            <div key={index} className="job-item">
+              <h3>{job.jobTitle}</h3>
+              <p>{job.jobDescription}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="chat-section">
+        <h2>Community Chat</h2>
+        <div className="message-list">
+          {messages.map((msg, index) => (
+            <div key={index} className="message">
+              <strong>{msg.username}</strong>: {msg.message}
+            </div>
+          ))}
+        </div>
+        <form onSubmit={submitMessage}>
+          <input 
+            type="text" 
+            placeholder="Type a message" 
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            required 
+          />
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function client() {
+  createRoot(document.getElementById("root")).render(<App />);
+}
+if (typeof document !== "undefined") { client(); }
+
+export default async function server(request: Request): Promise<Response> {
+  const { sqlite } = await import("https://esm.town/v/stevekrouse/sqlite");
+  const KEY = new URL(import.meta.url).pathname.split("/").at(-1);
+  const SCHEMA_VERSION = 3;
+
+  await sqlite.execute(`
+    CREATE TABLE IF NOT EXISTS ${KEY}_messages_${SCHEMA_VERSION} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL,
+      message TEXT NOT NULL,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await sqlite.execute(`
+    CREATE TABLE IF NOT EXISTS ${KEY}_jobs_${SCHEMA_VERSION} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      jobTitle TEXT NOT NULL,
+      jobDescription TEXT NOT NULL,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  if (request.method === "GET") {
+    const url = new URL(request.url);
+    
+    if (url.pathname === "/messages") {
+      const messages = await sqlite.execute(`
+        SELECT username, message FROM ${KEY}_messages_${SCHEMA_VERSION} 
+        ORDER BY timestamp DESC LIMIT 50
+      `);
+      return new Response(JSON.stringify(messages.rows), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    if (url.pathname === "/jobs") {
+      const jobs = await sqlite.execute(`
+        SELECT jobTitle, jobDescription FROM ${KEY}_jobs_${SCHEMA_VERSION} 
+        ORDER BY timestamp DESC LIMIT 50
+      `);
+      return new Response(JSON.stringify(jobs.rows), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+  }
+
+  if (request.method === "POST") {
+    const body = await request.json();
+    const url = new URL(request.url);
+
+    if (url.pathname === "/messages") {
+      await sqlite.execute(`
+        INSERT INTO ${KEY}_messages_${SCHEMA_VERSION} (username, message) 
+        VALUES (?, ?)
+      `, [body.username, body.message]);
+      return new Response("Message sent", { status: 200 });
+    }
+
+    if (url.pathname === "/jobs") {
+      await sqlite.execute(`
+        INSERT INTO ${KEY}_jobs_${SCHEMA_VERSION} (jobTitle, jobDescription) 
+        VALUES (?, ?)
+      `, [body.jobTitle, body.jobDescription]);
+      return new Response("Job posted", { status: 200 });
+    }
+  }
+
+  return new Response(`
+    <html>
+      <head>
+        <title>Job Chat</title>
+        <style>${css}</style>
+      </head>
+      <body>
+        <div id="root"></div>
+        <script src="https://esm.town/v/std/catch"></script>
+        <script type="module" src="${import.meta.url}"></script>
+      </body>
+    </html>
+  `, {
+    headers: { "Content-Type": "text/html" }
+  });
+}
+
+const css = `
+body {
+  font-family: Arial, sans-serif;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #f4f4f4;
+}
+
+.container {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+input, textarea {
+  width: 100%;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+button {
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.message-list, .job-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.message, .job-item {
+  margin-bottom: 10px;
+  padding: 10px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+}
+`;
